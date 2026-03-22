@@ -105,14 +105,15 @@ def edm_sampler(
             t_hat = t_cur
             x_hat = x_cur
 
-        # Euler step.
-        d_cur = (x_hat - denoise(x_hat, t_hat)) / t_hat
-        x_next = x_hat + (t_next - t_hat) * d_cur
+        # Euler step (HeunUDS).
+        aa = t_next / t_hat
+        den_hat = denoise(x_hat, t_hat)
+        x_next = aa * x_hat + (1 - aa) * den_hat
 
         # Apply 2nd order correction.
         if i < num_steps - 1:
-            d_prime = (x_next - denoise(x_next, t_next)) / t_next
-            x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
+            den_next = denoise(x_next, t_next)
+            x_next = aa * x_hat + (1 - aa) * (0.5 * den_hat + 0.5 * den_next)
 
     return x_next
 
