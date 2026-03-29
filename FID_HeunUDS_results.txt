@@ -1,0 +1,60 @@
+(venv) jakubdawidowicz@a100a:~/edm2$ torchrun --standalone --nproc_per_node=1 calculate_metrics.py gen     --net=https://nvlabs-fi-cdn.nvidia.com/edm2/posthoc-reconstructions/edm2-img512-s-2147483-0.130.pkl     --ref=https://nvlabs-fi-cdn.nvidia.com/edm2/dataset-refs/img512.pkl     --seed=0 --metrics=fid --batch=1024
+Loading feature statistics from https://nvlabs-fi-cdn.nvidia.com/edm2/dataset-refs/img512.pkl ...
+Loading main network from https://nvlabs-fi-cdn.nvidia.com/edm2/posthoc-reconstructions/edm2-img512-s-2147483-0.130.pkl ...
+Setting up StabilityVAEEncoder...
+/home/jakubdawidowicz/edm2/venv/lib/python3.12/site-packages/diffusers/utils/outputs.py:63: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  torch.utils._pytree._register_pytree_node(
+/home/jakubdawidowicz/edm2/venv/lib/python3.12/site-packages/diffusers/utils/outputs.py:63: FutureWarning: `torch.utils._pytree._register_pytree_node` is deprecated. Please use `torch.utils._pytree.register_pytree_node` instead.
+  torch.utils._pytree._register_pytree_node(
+/home/jakubdawidowicz/edm2/venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+[rank0]:[W322 20:54:28.217574818 ProcessGroupNCCL.cpp:5138] Guessing device ID based on global rank. This can cause a hang if rank to GPU mapping is heterogeneous. You can specify device_id in init_process_group()
+Generating 50000 images...
+Setting up InceptionV3Detector...
+Calculating feature statistics...
+ 65%|██████████████████████████████████████████████████████▏                            | 32/49 [1:29:03<47:16, 166.84s/batch]
+
+
+
+ 67%|███████████████████████████████████████████████████████▉                           | 33/49 [1:31:49<44:29, 166.83s/batch]
+
+ 69%|█████████████████████████████████████████████████████████▌                         | 34/49 [1:34:36<41:42, 166.81s/batch]
+ 71%|███████████████████████████████████████████████████████████▎                       | 35/49 [1:37:23<38:55, 166.79s/batch]
+
+ 78%|████████████████████████████████████████████████████████████████▎                  | 38/49 [1:45:43<30:34, 166.79s/batch]
+ 80%|██████████████████████████████████████████████████████████████████                 | 39/49 [1:48:30<27:47, 166.74s/batch]
+ 84%|█████████████████████████████████████████████████████████████████████▍             | 41/49 [1:54:03<22:13, 166.74s/batch]
+ 92%|████████████████████████████████████████████████████████████████████████████▏      | 45/49 [2:05:11<11:07, 166.75s/batch]
+
+ 98%|█████████████████████████████████████████████████████████████████████████████████▎ | 48/49 [2:13:31<02:46, 166.79s/batch]
+100%|███████████████████████████████████████████████████████████████████████████████████| 49/49 [2:16:18<00:00, 166.90s/batch]
+Calculating fid...
+/home/jakubdawidowicz/edm2/calculate_metrics.py:268: DeprecationWarning: The `disp` argument is deprecated and will be removed in SciPy 1.18.0.
+  s, _ = scipy.linalg.sqrtm(np.dot(stats[metric]['sigma'], ref[metric]['sigma']), disp=False)
+fid = 2.59578
+[rank0]:[W322 23:10:58.354637288 ProcessGroupNCCL.cpp:1553] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+
+
+
+
+
+
+
+
+
+
+
+
+(venv) jakubdawidowicz@asusgpu1:~/edm2$ python calculate_metrics.py calc --images=out_cfg     --ref=https://nvlabs-fi-cdn.nvidia.com/edm2/dataset-refs/img512.pkl --metrics=fid --batch=128
+Loading feature statistics from https://nvlabs-fi-cdn.nvidia.com/edm2/dataset-refs/img512.pkl ...
+Loading images from out_cfg ...
+/home/jakubdawidowicz/edm2/venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+[rank0]:[W324 08:32:53.033513640 ProcessGroupNCCL.cpp:5138] Guessing device ID based on global rank. This can cause a hang if rank to GPU mapping is heterogeneous. You can specify device_id in init_process_group()
+Setting up InceptionV3Detector...
+Calculating feature statistics...
+100%|████████████████████████████████████████████████████████████████████████████████████| 391/391 [10:07<00:00,  1.55s/batch]
+Calculating fid...
+/home/jakubdawidowicz/edm2/calculate_metrics.py:268: DeprecationWarning: The `disp` argument is deprecated and will be removed in SciPy 1.18.0.
+  s, _ = scipy.linalg.sqrtm(np.dot(stats[metric]['sigma'], ref[metric]['sigma']), disp=False)
+fid = 2.45155

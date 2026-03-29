@@ -195,6 +195,16 @@ def generate_images(
     if dist.get_rank() == 0:
         torch.distributed.barrier()
 
+    # Skip seeds whose images already exist (resume support).
+    if outdir is not None:
+        original_count = len(seeds)
+        seeds = [s for s in seeds if not os.path.isfile(
+            os.path.join(outdir, f'{s//1000*1000:06d}', f'{s:06d}.png') if subdirs else
+            os.path.join(outdir, f'{s:06d}.png')
+        )]
+        if verbose and original_count != len(seeds):
+            dist.print0(f'Resuming: skipping {original_count - len(seeds)} already generated images.')
+
     # Divide seeds into batches.
     num_batches = max((len(seeds) - 1) // (max_batch_size * dist.get_world_size()) + 1, 1) * dist.get_world_size()
     rank_batches = np.array_split(np.arange(len(seeds)), num_batches)[dist.get_rank() :: dist.get_world_size()]
