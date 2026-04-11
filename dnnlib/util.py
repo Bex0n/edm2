@@ -466,13 +466,13 @@ def open_url(url: str, cache_dir: Optional[str] = None, num_attempts: int = 10, 
 
     assert url_data is not None
 
-    # Save to cache.
+        # Save to cache.
     if cache:
         assert url_name is not None
         safe_name = re.sub(r"[^0-9a-zA-Z-._]", "_", url_name)
-        safe_name = safe_name[:min(len(safe_name), 128)]
+        safe_name = safe_name[:min(len(safe_name), 32)] # Shortened from 128
         cache_file = os.path.join(cache_dir, url_md5 + "_" + safe_name)
-        temp_file = os.path.join(cache_dir, "tmp_" + uuid.uuid4().hex + "_" + url_md5 + "_" + safe_name)
+        temp_file = os.path.join(cache_dir, "tmp_" + url_md5[:8] + "_" + safe_name) # Shortened temp prefix
         os.makedirs(cache_dir, exist_ok=True)
         with open(temp_file, "wb") as f:
             f.write(url_data)

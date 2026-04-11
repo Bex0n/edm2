@@ -22,6 +22,10 @@ from torch_utils import distributed as dist
 warnings.filterwarnings('ignore', '`resume_download` is deprecated')
 warnings.filterwarnings('ignore', 'You are using `torch.load` with `weights_only=False`')
 warnings.filterwarnings('ignore', '1Torch was not compiled with flash attention')
+ 
+import huggingface_hub
+if not hasattr(huggingface_hub, 'cached_download'):
+    huggingface_hub.cached_download = huggingface_hub.hf_hub_download
 
 #----------------------------------------------------------------------------
 # Configuration presets.
@@ -67,6 +71,66 @@ config_presets = {
     'edm2-img64-s-autog-dino':         dnnlib.EasyDict(net=f'{model_root}/edm2-img64-s-1073741-0.105.pkl',         gnet=f'{model_root}/edm2-img64-xs-0134217-0.175.pkl',         guidance=2.20), # fd_dinov2 = 31.85
 }
 
+def compute_mse_diffusion_schedule(sigmas):
+    """Compute MSE-diffusion q_st and beta_st from the sigma schedule.
+ 
+    Translated from the discrete case in diffusionParam4JD.r (lines 1-25).
+    Uses F-pred parameterization (EDM2).
+ 
+    In EDM2 notation: sigma = 1/rho_ring, so roO = 1/sigma.
+ 
+    Args:
+        sigmas: 1D tensor of sigma values (decreasing), length N+1.
+                sigmas[0]=sigma_max, sigmas[-1]=0.
+ 
+    Returns:
+        q_mse:    numpy array of length N — the q_st weights per step.
+        beta_mse: numpy array of length N — the diffusion sizes per step.
+    """
+    if isinstance(sigmas, torch.Tensor):
+        sigmas_np = sigmas.cpu().numpy()
+    else:
+        sigmas_np = np.asarray(sigmas, dtype=np.float64)
+ 
+    N = len(sigmas_np) - 1
+    q_mse = np.zeros(N, dtype=np.float64)
+    beta_mse = np.zeros(N, dtype=np.float64)
+ 
+    # Only compute for pairs where both sigmas > 0.
+    valid = (sigmas_np[:-1] > 0) & (sigmas_np[1:] > 0)
+    if not np.any(valid):
+        return q_mse, beta_mse
+ 
+    s_old = sigmas_np[:-1][valid]
+    s_new = sigmas_np[1:][valid]
+ 
+    gaO = (s_old / s_new) ** 2         # (roO_new / roO_old)^2
+ 
+    # F-pred parameterization: S_t = sqrt(4*sigma^2 + 1)
+    fpred = np.sqrt(1.0 + 4.0 * s_old ** 2)
+ 
+    # Normalization constant M (discrete): M = max (gaO-1)/(2*S^2)
+    ratio = np.sqrt((gaO - 1.0) / 2.0) / fpred
+    M_factor = np.max(ratio)
+    fpred_norm = fpred * M_factor + 1e-10
+ 
+    # eta^2 from discrete MSE-diffusion coherence (Prop. 5.1 discrete analogue)
+    eta2 = (gaO - 1.0) ** 2 / (
+        fpred_norm * np.sqrt(2.0 * gaO)
+        + np.sqrt(2.0 * fpred_norm ** 2 + 1.0 - gaO)
+    ) ** 2
+ 
+    # ga = (rho_new / rho_old)^2 for the MSE-diffusion
+    ga = 1.0 / (1.0 - eta2)
+ 
+    # q_st = r_old / r_new = 1/sqrt(ga * gaO)
+    q_mse[valid] = 1.0 / np.sqrt(ga * gaO)
+ 
+    # beta_st = sqrt(eta^2) * sigma_next (target noise level)
+    beta_mse[valid] = np.sqrt(eta2) * s_new
+ 
+    return q_mse, beta_mse
+
 #----------------------------------------------------------------------------
 # EDM sampler from the paper
 # "Elucidating the Design Space of Diffusion-Based Generative Models",
@@ -76,6 +140,7 @@ def edm_sampler(
     net, noise, labels=None, gnet=None,
     num_steps=32, sigma_min=0.002, sigma_max=80, rho=7, guidance=1,
     S_churn=0, S_min=0, S_max=float('inf'), S_noise=1,
+    diffusion_mode='flow',
     dtype=torch.float32, randn_like=torch.randn_like,
 ):
     # Guided denoiser.
@@ -91,11 +156,16 @@ def edm_sampler(
     t_steps = (sigma_max ** (1 / rho) + step_indices / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))) ** rho
     t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])]) # t_N = 0
 
+    if diffusion_mode == 'mse':
+        q_schedule, beta_schedule = compute_mse_diffusion_schedule(t_steps)
+        # print(f"q_schedule: {q_schedule.tolist()}")
+        # print(f"beta_schedule: {beta_schedule.tolist()}")
+
     # Main sampling loop.
     x_next = noise.to(dtype) * t_steps[0]
-    for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])): # 0, ..., N-1
+    for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])):  # 0, ..., N-1
         x_cur = x_next
-
+ 
         # Increase noise temporarily.
         if S_churn > 0 and S_min <= t_cur <= S_max:
             gamma = min(S_churn / num_steps, np.sqrt(2) - 1)
@@ -104,17 +174,28 @@ def edm_sampler(
         else:
             t_hat = t_cur
             x_hat = x_cur
-
-        # Euler step (HeunUDS).
-        aa = t_next / t_hat
+ 
+        # Determine q_st for this step.
+        if diffusion_mode == 'mse':
+            aa = float(q_schedule[i])
+        else:  # 'flow'
+            aa = t_next / t_hat
+ 
+        # Euler step (HeunUDS eq. 10).
         den_hat = denoise(x_hat, t_hat)
         x_next = aa * x_hat + (1 - aa) * den_hat
-
-        # Apply 2nd order correction.
+ 
+        # Apply 2nd order Heun correction (eq. 11).
         if i < num_steps - 1:
             den_next = denoise(x_next, t_next)
             x_next = aa * x_hat + (1 - aa) * (0.5 * den_hat + 0.5 * den_next)
-
+ 
+        # Add MSE-diffusion stochasticity: + beta_st * xi_s
+        if diffusion_mode == 'mse':
+            beta_i = float(beta_schedule[i])
+            if beta_i > 0:
+                x_next = x_next + beta_i * randn_like(x_next)
+ 
     return x_next
 
 #----------------------------------------------------------------------------
@@ -290,6 +371,8 @@ def parse_int_list(s):
 @click.option('--S_min', 'S_min',           help='Stoch. min noise level', metavar='FLOAT',                         type=click.FloatRange(min=0), default=0, show_default=True)
 @click.option('--S_max', 'S_max',           help='Stoch. max noise level', metavar='FLOAT',                         type=click.FloatRange(min=0), default='inf', show_default=True)
 @click.option('--S_noise', 'S_noise',       help='Stoch. noise inflation', metavar='FLOAT',                         type=float, default=1, show_default=True)
+@click.option('--diffusion', 'diffusion_mode', help='Diffusion mode', type=click.Choice(['flow', 'mse']), default='flow', show_default=True)
+
 
 def cmdline(preset, **opts):
     """Generate random images using the given model.

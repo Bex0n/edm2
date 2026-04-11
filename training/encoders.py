@@ -140,6 +140,9 @@ def load_stability_vae(vae_name='stabilityai/sd-vae-ft-mse', device=torch.device
     os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = '1'
     os.environ['HF_HOME'] = cache_dir
 
+    import huggingface_hub
+    if not hasattr(huggingface_hub, 'cached_download'):
+        huggingface_hub.cached_download = huggingface_hub.hf_hub_download
     import diffusers # pip install diffusers # pyright: ignore [reportMissingImports]
     try:
         # First try with local_files_only to avoid consulting tfhub metadata if the model is already in cache.
